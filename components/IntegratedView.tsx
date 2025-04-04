@@ -38,6 +38,7 @@ interface Post {
     communityId: string;
     title: string;
     likeCount: number;
+    dislikeCount: number; // Nuevo campo para contabilizar dislikes
     commentCount: number;
     isActive: boolean;
 }
@@ -207,6 +208,7 @@ export const IntegratedView = ({
     const [loadingComments, setLoadingComments] = useState<Record<string, boolean>>({});
     const [submittingComment, setSubmittingComment] = useState<Record<string, boolean>>({});
     const [likingPost, setLikingPost] = useState<Record<string, boolean>>({});
+    const [dislikingPost, setDislikingPost] = useState<Record<string, boolean>>({});
 
     // Communities states
     const [newTopic, setNewTopic] = useState("");
@@ -218,6 +220,15 @@ export const IntegratedView = ({
     const [searchQuery, setSearchQuery] = useState("");
     const [searchType, setSearchType] = useState<"all" | "name" | "description" | "topics">("all");
     const [showOnlyMyComm, setShowOnlyMyComm] = useState(false);
+    
+    // Auto-logout states
+    const [lastActivity, setLastActivity] = useState<number>(Date.now());
+    const [showInactivityWarning, setShowInactivityWarning] = useState<boolean>(false);
+    const [logoutCountdown, setLogoutCountdown] = useState<number>(60); // 60 seconds countdown
+    const [countdownInterval, setCountdownInterval] = useState<NodeJS.Timeout | null>(null);
+    
+    // Estado para controlar usuarios viendo en vivo
+    const [liveViewers, setLiveViewers] = useState<Record<string, number>>({});
 
     // CreatePost states - use external state if provided, otherwise use internal state
     const [internalIsCreatingPost, setInternalIsCreatingPost] = useState(false);
@@ -303,6 +314,98 @@ export const IntegratedView = ({
             setPostSelectedTopic("");
         }
     }, [isCreatingPost]);
+    
+    // Efecto para simular usuarios viendo en vivo
+    useEffect(() => {
+        if (selectedCommunityId) {
+            // Simular conteo inicial de usuarios viendo en vivo
+            const randomViewers = Math.floor(Math.random() * 15) + 1; // Entre 1 y 15 personas
+            setLiveViewers(prev => ({ ...prev, [selectedCommunityId]: randomViewers }));
+
+            // En producción, esto podría conectarse a un WebSocket o una API en tiempo real
+            const liveViewerInterval = setInterval(() => {
+                // Simula cambios aleatorios de viewers para demostración
+                setLiveViewers(prev => {
+                    const currentViewers = prev[selectedCommunityId] || randomViewers;
+                    const change = Math.floor(Math.random() * 3) - 1; // -1, 0, o 1
+                    const newCount = Math.max(1, currentViewers + change); // Mínimo 1 viewer
+                    return { ...prev, [selectedCommunityId]: newCount };
+                });
+            }, 5000);
+            
+            return () => clearInterval(liveViewerInterval);
+        }
+    }, [selectedCommunityId]);
+    
+    // Auto-logout: Activity tracking function
+    const updateActivity = () => {
+        setLastActivity(Date.now());
+        if (showInactivityWarning) {
+            setShowInactivityWarning(false);
+            if (countdownInterval) {
+                clearInterval(countdownInterval);
+                setCountdownInterval(null);
+            }
+            setLogoutCountdown(60);
+        }
+    };
+    
+    // Auto-logout: Handle logout function
+    const handleLogout = () => {
+        // Clear any user session data
+        localStorage.removeItem('userAccount'); // Adjust based on how you store session
+        
+        // Redirect to login page
+        window.location.href = '/';
+    };
+    
+    // Auto-logout: Check for inactivity
+    useEffect(() => {
+        // Check for inactivity every minute
+        const inactivityCheck = setInterval(() => {
+            const now = Date.now();
+            const inactiveTime = now - lastActivity;
+            
+            // Si inactivo por 10 minutos (600,000 ms)
+            if (inactiveTime > 600000 && !showInactivityWarning) {
+                setShowInactivityWarning(true);
+                
+                // Start the 30-second countdown for auto-logout
+                const interval = setInterval(() => {
+                    setLogoutCountdown(prev => {
+                        if (prev <= 1) {
+                            clearInterval(interval);
+                            handleLogout();
+                            return 0;
+                        }
+                        return prev - 1;
+                    });
+                }, 1000);
+                
+                setCountdownInterval(interval);
+            }
+        }, 30000); // Revisar cada 30 segundos
+        
+        // Add event listeners to detect user activity
+        window.addEventListener('mousemove', updateActivity);
+        window.addEventListener('mousedown', updateActivity);
+        window.addEventListener('keypress', updateActivity);
+        window.addEventListener('scroll', updateActivity);
+        window.addEventListener('touchstart', updateActivity);
+        
+        // Cleanup function
+        return () => {
+            clearInterval(inactivityCheck);
+            if (countdownInterval) {
+                clearInterval(countdownInterval);
+            }
+            window.removeEventListener('mousemove', updateActivity);
+            window.removeEventListener('mousedown', updateActivity);
+            window.removeEventListener('keypress', updateActivity);
+            window.removeEventListener('scroll', updateActivity);
+            window.removeEventListener('touchstart', updateActivity);
+        };
+    }, [lastActivity, showInactivityWarning, countdownInterval]);
 
 
     // CreatePost functions
@@ -944,6 +1047,51 @@ export const IntegratedView = ({
             }));
         }
     };
+    
+    const dislikePost = async (postId: string) => {
+        if (!isConnected || !walletProvider) {
+            alert("Please connect your wallet to dislike posts");
+            return;
+        }
+
+        if (dislikingPost[postId]) return;
+
+        try {
+            setDislikingPost(prev => ({
+                ...prev,
+                [postId]: true
+            }));
+
+            const signer = await walletProvider.getSigner();
+            const contract = new Contract(forumAddress, forumABI, signer);
+            
+            // Asumimos que existe un método dislikePost en el contrato similar a likePost
+            // Si el contrato no tiene este método, habría que agregarlo
+            const tx = await contract.dislikePost(postId);
+            await tx.wait();
+
+            // Usar la función adecuada para refrescar los posts
+            if (selectedCommunityId && fetchPostsForCommunity) {
+                await fetchPostsForCommunity(selectedCommunityId);
+            } else {
+                await fetchPostsFromContract();
+            }
+
+            console.log(`Post ${postId} disliked successfully. Posts refreshed.`);
+        } catch (error) {
+            console.error("Error disliking post:", error);
+            if (error instanceof Error && error.toString().includes("already disliked")) {
+                alert("You have already disliked this post.");
+            } else {
+                alert("Failed to dislike post. Make sure your wallet is connected and you have enough gas.");
+            }
+        } finally {
+            setDislikingPost(prev => ({
+                ...prev,
+                [postId]: false
+            }));
+        }
+    };
 
     // Helper functions
     const formatDate = (timestamp: number) => {
@@ -1411,19 +1559,26 @@ export const IntegratedView = ({
 
                 {/* Community info and back button */}
                 <div className="flex items-center justify-between">
-                    <span className="text-white text-sm">
+                    <div className="text-white text-sm flex items-center gap-3">
                         {selectedCommunityId ? (
                             <>
-                                Viewing posts in: <span className="text-[var(--matrix-green)] font-semibold">
-                                    {getCommunityName(selectedCommunityId)}
-                                </span>
+                                <div>
+                                    Viewing posts in: <span className="text-[var(--matrix-green)] font-semibold">
+                                        {getCommunityName(selectedCommunityId)}
+                                    </span>
+                                </div>
+                                {/* Indicador de usuarios viendo en vivo */}
+                                <div className="flex items-center text-[var(--matrix-green)] text-xs animate-pulse">
+                                    <span className="w-2 h-2 bg-red-500 rounded-full mr-1"></span>
+                                    {liveViewers[selectedCommunityId] || 1} watching live
+                                </div>
                             </>
                         ) : (
                             <>
                                 Viewing posts from all your communities
                             </>
                         )}
-                    </span>
+                    </div>
                     <button
                         onClick={toggleView}
                         className="text-[var(--matrix-green)] text-xs border border-[var(--matrix-green)] px-2 py-1 rounded hover:bg-[var(--matrix-green)]/10"
@@ -1497,6 +1652,17 @@ export const IntegratedView = ({
                                     {likingPost[post.id] ? '💗' : '❤'}
                                 </span>
                                 <span>{post.likeCount} likes</span>
+                            </button>
+                            
+                            <button
+                                onClick={() => dislikePost(post.id)}
+                                className="flex items-center space-x-1 text-red-500 hover:text-red-400 transition-colors"
+                                disabled={dislikingPost[post.id]}
+                            >
+                                <span className={`${dislikingPost[post.id] ? 'animate-pulse' : ''}`}>
+                                    {dislikingPost[post.id] ? '💔' : '👎'}
+                                </span>
+                                <span>{post.dislikeCount || 0} dislikes</span>
                             </button>
                             <button
                                 onClick={() => toggleComments(post.id)}
@@ -1609,15 +1775,60 @@ export const IntegratedView = ({
         );
     };
 
+    // Render the Inactivity Warning Dialog
+    const renderInactivityWarningDialog = () => {
+        if (!showInactivityWarning) return null;
+        
+        return (
+            <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
+                <div className="bg-black border-2 border-[var(--matrix-green)] p-6 rounded-lg max-w-md w-full animate-pulse-border">
+                    <h2 className="text-xl font-bold text-[var(--matrix-green)] mb-4">Session Timeout Warning</h2>
+                    <p className="text-white mb-6">TEST MODE: You have been inactive for 10 seconds.</p>
+                    <p className="text-gray-300 mb-6">For testing purposes, your session will automatically logout in:</p>
+                    
+                    <div className="text-center mb-6">
+                        <span className="text-4xl font-bold text-[var(--matrix-green)]">{logoutCountdown}</span>
+                        <span className="text-xl text-white ml-2">seconds</span>
+                    </div>
+                    
+                    <div className="flex justify-center">
+                        <button 
+                            onClick={updateActivity}
+                            className="px-6 py-3 bg-[var(--matrix-green)] text-black rounded hover:bg-opacity-80 font-bold"
+                        >
+                            Stay Logged In
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
     // Check if user has any communities they're a member of or creator of
     const hasAccessibleCommunities = useMemo(() => {
         return localCommunities.some(community => community.isMember || community.isCreator);
     }, [localCommunities]);
 
+    // CSS para la animación de pulso
+    const pulseStyle = `
+        @keyframes pulseBorder {
+            0% { border-color: var(--matrix-green); }
+            50% { border-color: rgba(0, 255, 60, 0.5); }
+            100% { border-color: var(--matrix-green); }
+        }
+        .animate-pulse-border {
+            animation: pulseBorder 1.5s infinite;
+        }
+    `;
+    
     return (
         <div className="bg-[var(--background-dark)] text-white min-h-screen p-4">
-            {/* Mostrar el diálogo de confirmación si es necesario */}
+            {/* CSS para animaciones */}
+            <style>{pulseStyle}</style>
+            
+            {/* Diálogos */}
             {renderJoinConfirmationDialog()}
+            {renderInactivityWarningDialog()}
             
             {/* Title always at top */}
             <h1 className="text-2xl font-mono text-center text-[var(--matrix-green)] mb-2">
