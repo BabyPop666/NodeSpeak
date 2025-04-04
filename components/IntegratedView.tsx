@@ -1783,8 +1783,8 @@ export const IntegratedView = ({
             <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
                 <div className="bg-black border-2 border-[var(--matrix-green)] p-6 rounded-lg max-w-md w-full animate-pulse-border">
                     <h2 className="text-xl font-bold text-[var(--matrix-green)] mb-4">Session Timeout Warning</h2>
-                    <p className="text-white mb-6">TEST MODE: You have been inactive for 10 seconds.</p>
-                    <p className="text-gray-300 mb-6">For testing purposes, your session will automatically logout in:</p>
+                    <p className="text-white mb-6">You have been inactive for 10 minutes.</p>
+                    <p className="text-gray-300 mb-6">Your session will automatically logout in:</p>
                     
                     <div className="text-center mb-6">
                         <span className="text-4xl font-bold text-[var(--matrix-green)]">{logoutCountdown}</span>
