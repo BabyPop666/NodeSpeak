@@ -217,7 +217,6 @@ export const IntegratedView = ({
     // Search states
     const [searchQuery, setSearchQuery] = useState("");
     const [searchType, setSearchType] = useState<"all" | "name" | "description" | "topics">("all");
-    const [showOnlyMyComm, setShowOnlyMyComm] = useState(false);
 
     // CreatePost states - use external state if provided, otherwise use internal state
     const [internalIsCreatingPost, setInternalIsCreatingPost] = useState(false);
@@ -499,24 +498,12 @@ export const IntegratedView = ({
         }
     };
 
-    // Filter communities based on search query, search type and my communities filter
+    // Filter communities based on search query and search type
     const filteredCommunities = useMemo(() => {
-        // Start with all communities or just mine based on filter
-        let filtered = localCommunities;
+        if (!searchQuery) return localCommunities;
         
-        // Apply my communities filter if enabled
-        if (showOnlyMyComm) {
-            filtered = filtered.filter(community => 
-                community.isMember || community.isCreator
-            );
-        }
-        
-        // If no search query, return the filtered list
-        if (!searchQuery) return filtered;
-        
-        // Apply search query filter
         const queryLower = searchQuery.toLowerCase();
-        return filtered.filter(community => {
+        return localCommunities.filter(community => {
             switch (searchType) {
                 case 'name':
                     return community.name.toLowerCase().includes(queryLower);
@@ -536,7 +523,7 @@ export const IntegratedView = ({
                     );
             }
         });
-    }, [localCommunities, searchQuery, searchType, showOnlyMyComm]);
+    }, [localCommunities, searchQuery, searchType]);
 
     // Filter posts based on selected community and topic
     const filteredPosts = useMemo(() => {
@@ -701,26 +688,19 @@ export const IntegratedView = ({
 
 
     // Community related functions
-    // Estado para mostrar el diálogo de confirmación para unirse
-    const [showJoinConfirmation, setShowJoinConfirmation] = useState<string | null>(null);
-
     const handleCommunityClick = (community: Community) => {
-        // Si el usuario ya es miembro, mostrar los posts
+        // Primero cambiar a la vista de posts si el usuario es miembro
         if (community.isMember || community.isCreator) {
             setShowCommunityList(false);
-            setSelectedCommunityId(community.id);
-            setSelectedTopic(null); // Reset topic filter
-        } else {
-            // Si no es miembro, mostrar confirmación para unirse
-            setShowJoinConfirmation(community.id);
         }
-    };
 
-    // Manejar la confirmación para unirse a una comunidad
-    const handleJoinConfirmation = (communityId: string) => {
-        handleJoinCommunity(communityId);
-        setShowJoinConfirmation(null);
-        // No cambiamos inmediatamente a la vista de posts, esperamos a que se una
+        // Luego actualizar el ID de comunidad seleccionada
+        // Esto activará el useEffect que cargará los posts
+        setSelectedCommunityId(community.id);
+        setSelectedTopic(null); // Reset topic filter
+
+        // Ya no llamamos explícitamente a fetchPostsForCommunity o fetchPostsFromContract aquí
+        // porque el useEffect se encargará de eso cuando cambie selectedCommunityId
     };
 
     // Handle topic pill click in the community list
@@ -1138,24 +1118,15 @@ export const IntegratedView = ({
         <div>
             {/* Search Communities Container */}
             <div className="border-2 border-[var(--matrix-green)] rounded-lg p-4 mb-5 bg-black bg-opacity-70 shadow-lg">
-                {/* Title and My Communities Toggle */}
-                <div className="flex items-center justify-between mb-3 border-b border-[var(--matrix-green)] pb-2">
-                    <span className="text-[var(--matrix-green)] text-xl font-bold">Search Communities</span>
-                    
-                    <div className="flex items-center space-x-2">
-                        <span className="text-sm text-gray-300">My Communities</span>
-                        <button 
-                            onClick={() => setShowOnlyMyComm(!showOnlyMyComm)}
-                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--matrix-green)] focus:ring-offset-2 ${showOnlyMyComm ? 'bg-[var(--matrix-green)]' : 'bg-gray-700'}`}
-                        >
-                            <span 
-                                className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${showOnlyMyComm ? 'translate-x-6' : 'translate-x-1'}`} 
-                            />
-                        </button>
-                    </div>
+                {/* Title with Magnifying Glass Icon */}
+                <div className="flex items-center mb-3 border-b border-[var(--matrix-green)] pb-2">
+                    <span className="text-[var(--matrix-green)] text-xl font-bold mr-2">Search Communities</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-[var(--matrix-green)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
                 </div>
                 
-                {/* Search Input with Dynamic Icon and Clear Button */}
+                {/* Search Input with Dynamic Icon */}
                 <div className="relative mb-4">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                         {searchType === 'all' && <span className="text-[var(--matrix-green)]">🌐</span>}
@@ -1168,18 +1139,8 @@ export const IntegratedView = ({
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         placeholder="Find a community..."
-                        className="bg-black border-2 border-[var(--matrix-green)] text-white p-2 pl-10 pr-10 rounded w-full focus:ring-2 focus:ring-[var(--matrix-green)] focus:outline-none"
+                        className="bg-black border-2 border-[var(--matrix-green)] text-white p-2 pl-10 rounded w-full focus:ring-2 focus:ring-[var(--matrix-green)] focus:outline-none"
                     />
-                    {searchQuery && (
-                        <button 
-                            onClick={() => setSearchQuery('')}
-                            className="absolute inset-y-0 right-0 pr-3 flex items-center text-[var(--matrix-green)] hover:text-white transition-colors"
-                        >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                        </button>
-                    )}
                 </div>
                 
                 {/* Search Type Buttons */}
@@ -1347,23 +1308,33 @@ export const IntegratedView = ({
                                         )}
                                     </div>
 
-                                    {/* Solo mostrar botón Leave para miembros no creadores */}
-                                    {!community.isCreator && community.isMember && (
+                                    {/* Join/Leave button - Only show for non-creators */}
+                                    {!community.isCreator && (
                                         <button
                                             onClick={(e) => {
                                                 e.stopPropagation();
-                                                handleLeaveCommunity(community.id);
+                                                if (community.isMember) {
+                                                    handleLeaveCommunity(community.id);
+                                                } else {
+                                                    handleJoinCommunity(community.id);
+                                                }
                                             }}
-                                            className={`px-3 py-1 rounded text-sm font-medium ${leavingCommunityId === community.id
+                                            className={`px-3 py-1 rounded text-sm font-medium ${joiningCommunityId === community.id || leavingCommunityId === community.id
                                                 ? "bg-gray-600 text-white"
-                                                : "bg-red-800 hover:bg-red-700 text-white"
+                                                : community.isMember
+                                                    ? "bg-red-800 hover:bg-red-700 text-white"
+                                                    : "bg-[var(--matrix-green)] hover:bg-opacity-80 text-black"
                                                 }`}
-                                            disabled={leavingCommunityId === community.id}
+                                            disabled={joiningCommunityId === community.id || leavingCommunityId === community.id}
                                         >
-                                            {leavingCommunityId === community.id ? (
+                                            {joiningCommunityId === community.id ? (
+                                                <span className="animate-pulse">Joining...</span>
+                                            ) : leavingCommunityId === community.id ? (
                                                 <span className="animate-pulse">Leaving...</span>
-                                            ) : (
+                                            ) : community.isMember ? (
                                                 "Leave"
+                                            ) : (
+                                                "Join"
                                             )}
                                         </button>
                                     )}
@@ -1571,54 +1542,13 @@ export const IntegratedView = ({
         </div>
     );
 
-    // Renderizar el diálogo de confirmación para unirse a una comunidad
-    const renderJoinConfirmationDialog = () => {
-        if (!showJoinConfirmation) return null;
-        
-        const community = localCommunities.find(c => c.id === showJoinConfirmation);
-        if (!community) return null;
-        
-        return (
-            <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
-                <div className="bg-black border-2 border-[var(--matrix-green)] p-6 rounded-lg max-w-md w-full">
-                    <h2 className="text-xl font-bold text-[var(--matrix-green)] mb-4">Join Community</h2>
-                    <p className="text-white mb-6">Do you want to join the <span className="font-bold text-[var(--matrix-green)]">{community.name}</span> community?</p>
-                    <p className="text-gray-300 mb-6 text-sm">You must be a member to view and create posts in this community.</p>
-                    
-                    <div className="flex justify-end space-x-3">
-                        <button 
-                            onClick={() => setShowJoinConfirmation(null)}
-                            className="px-4 py-2 border border-gray-500 text-gray-300 rounded hover:bg-gray-800"
-                        >
-                            Cancel
-                        </button>
-                        <button 
-                            onClick={() => handleJoinConfirmation(community.id)}
-                            className="px-4 py-2 bg-[var(--matrix-green)] text-black rounded hover:bg-opacity-80"
-                            disabled={joiningCommunityId === community.id}
-                        >
-                            {joiningCommunityId === community.id ? (
-                                <span className="animate-pulse">Joining...</span>
-                            ) : (
-                                "Join"
-                            )}
-                        </button>
-                    </div>
-                </div>
-            </div>
-        );
-    };
-
     // Check if user has any communities they're a member of or creator of
     const hasAccessibleCommunities = useMemo(() => {
         return localCommunities.some(community => community.isMember || community.isCreator);
     }, [localCommunities]);
 
     return (
-        <div className="bg-[var(--background-dark)] text-white min-h-screen p-4">
-            {/* Mostrar el diálogo de confirmación si es necesario */}
-            {renderJoinConfirmationDialog()}
-            
+        <div className="terminal-window p-6 rounded-lg">
             {/* Title always at top */}
             <h1 className="text-2xl font-mono text-center text-[var(--matrix-green)] mb-2">
                 {isCreatingCommunity
